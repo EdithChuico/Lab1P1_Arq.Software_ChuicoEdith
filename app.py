@@ -2,8 +2,10 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-
-from flask import Flask, render_template, request, flash
+import jwt
+import datetime
+from functools import wraps
+from flask import Flask, render_template, request, flash, jsonify
 from sklearn.model_selection import train_test_split
 
 from filtros import (
@@ -21,13 +23,36 @@ app = Flask(
     static_url_path="/public"
 )
 
-app.secret_key = "cambia-esta-clave-en-produccion"
+app.secret_key = "EdithChuico1234"
 
 # Configuración del modelo
 MODEL_PATH = Path("models/weather_model.joblib")
 MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 TARGET = "rain"
+
+#SEGURIDAD
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'error': 'Token faltante. Acceso denegado.'}), 401
+        try:
+            token = token.split(" ")[1]
+            jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+        except Exception as e:
+            return jsonify({'error': 'Token inválido o expirado.'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route("/auth", methods=["POST"])
+def auth():
+    token = jwt.encode({
+        'user': 'estudiante_arq',
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+    }, app.config['SECRET_KEY'], algorithm="HS256")
+    return jsonify({'token': token})
 
 @app.route("/", methods=["GET"])
 def index():
@@ -118,65 +143,45 @@ def train():
         return index()
 
 @app.route("/predict", methods=["POST"])
+@token_required
 def predict():
     if not MODEL_PATH.exists():
-        flash("Primero entrena un modelo subiendo un dataset.")
-        return index()
+        return jsonify({"error": "Primero entrena un modelo subiendo un dataset."}), 400
 
     try:
         saved = joblib.load(MODEL_PATH)
-
         features = saved["features"]
         model = saved["model"]
-
         values = {}
 
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No se recibieron datos."}), 400
+
         for feature in features:
-            raw_value = request.form.get(feature, "").strip()
-
+            raw_value = str(data.get(feature, "")).strip()
             if raw_value == "":
-                raise ValueError(
-                    f"El campo '{feature}' es obligatorio."
-                )
-
-            # Convertir a número cuando corresponda.
+                return jsonify({"error": f"El campo '{feature}' es obligatorio."}), 400
             try:
                 values[feature] = float(raw_value)
             except ValueError:
                 values[feature] = raw_value
 
-        sample = pd.DataFrame(
-            [values],
-            columns=features
-        )
-
+        sample = pd.DataFrame([values], columns=features)
         prediction = model.predict(sample)[0]
 
         probability = None
-
         if hasattr(model, "predict_proba"):
             probabilities = model.predict_proba(sample)[0]
-            probability = round(
-                float(max(probabilities)) * 100,
-                2
-            )
+            probability = round(float(max(probabilities)) * 100, 2)
 
-        prediction_result = {
+        return jsonify({
             "label": str(prediction),
             "probability": probability
-        }
-
-        return render_template(
-            "index.html",
-            results=None,
-            prediction_features=features,
-            prediction_result=prediction_result
-        )
-
+        })
     except Exception as exc:
         app.logger.exception("Error durante la predicción")
-        flash(f"No se pudo generar la predicción: {exc}")
-        return index()
+        return jsonify({"error": f"Error del servidor: {str(exc)}"}), 500
 
 if __name__ == "__main__":
     app.run(

@@ -260,6 +260,61 @@
                 <i class="bi bi-save me-1"></i>Modelo guardado en
                 <code>{{ results.model_path }}</code>
             </p>
+
+            <div class="row mt-5">
+                <div class="col-12">
+                    <section class="wm-card shadow-sm" aria-labelledby="t-predict">
+                        <div class="wm-card-head bg-primary text-white">
+                            <h2 id="t-predict" class="h5 mb-0 text-white">
+                                <i class="bi bi-magic me-2"></i>Realizar una Predicción
+                            </h2>
+                            <p class="mb-0 small text-white-50">
+                                Ingresa las características meteorológicas para predecir la lluvia usando el modelo
+                                entrenado.
+                            </p>
+                        </div>
+                        <div class="wm-card-body">
+                            <form id="prediction-form">
+                                <div class="row g-3">
+                                    {% for feature in prediction_features %}
+                                    <div class="col-md-4 col-sm-6">
+                                        <label for="{{ feature }}" class="form-label small fw-bold">{{ feature}}</label>
+                                        <input type="text" class="form-control" id="{{ feature }}" name="{{ feature }}"
+                                            required>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+
+                                <div class="mt-4 border-top pt-3 d-flex align-items-center">
+                                    <button type="submit" class="btn btn-primary" id="btn-predict">
+                                        <i class="bi bi-lightning-charge-fill me-1"></i>Predecir ahora
+                                    </button>
+                                </div>
+                            </form>
+
+                            <div id="prediction-result-container" class="mt-4 d-none">
+                                <div class="alert alert-success d-flex align-items-center mb-0" role="alert">
+                                    <i class="bi bi-check-circle-fill me-3 fs-3"></i>
+                                    <div>
+                                        <h4 class="alert-heading h6 fw-bold mb-1">Resultado de la predicción</h4>
+                                        <p class="mb-0" id="prediction-text"></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="prediction-error-container" class="mt-4 d-none">
+                                <div class="alert alert-danger d-flex align-items-center mb-0" role="alert">
+                                    <i class="bi bi-exclamation-triangle-fill me-3 fs-3"></i>
+                                    <div>
+                                        <h4 class="alert-heading h6 fw-bold mb-1">Error</h4>
+                                        <p class="mb-0" id="prediction-error-text"></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
         </section>
         {% endif %} {% endif %}
     </main>
@@ -348,6 +403,68 @@
                 });
             });
         })();
+        // =========================================================
+        // RETO DE ARQUITECTURA: Lógica asíncrona y JWT para predicción
+        // =========================================================
+        var predictForm = document.getElementById("prediction-form");
+        if (predictForm) {
+            predictForm.addEventListener("submit", function (e) {
+                e.preventDefault();
+
+                var btn = document.getElementById("btn-predict");
+                var resultContainer = document.getElementById("prediction-result-container");
+                var resultText = document.getElementById("prediction-text");
+                var errorContainer = document.getElementById("prediction-error-container");
+                var errorText = document.getElementById("prediction-error-text");
+
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Procesando...';
+                resultContainer.classList.add("d-none");
+                errorContainer.classList.add("d-none");
+
+                var formData = new FormData(predictForm);
+                var data = {};
+                formData.forEach(function (value, key) { data[key] = value; });
+
+                fetch("/auth", { method: "POST" })
+                    .then(function (res) { return res.json(); })
+                    .then(function (authData) {
+                        var token = authData.token;
+
+                        return fetch("/predict", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": "Bearer " + token
+                            },
+                            body: JSON.stringify(data)
+                        });
+                    })
+                    .then(function (response) {
+                        return response.json().then(function (json) {
+                            return { status: response.status, body: json };
+                        });
+                    })
+                    .then(function (res) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-lightning-charge-fill me-1"></i>Predecir ahora';
+
+                        if (res.status === 200) {
+                            resultText.innerHTML = "El modelo ha predecido la clase <strong>" + res.body.label + "</strong> con una certeza del <strong>" + res.body.probability + "%</strong>.";
+                            resultContainer.classList.remove("d-none");
+                        } else {
+                            errorText.innerText = res.body.error || "Ocurrió un error inesperado.";
+                            errorContainer.classList.remove("d-none");
+                        }
+                    })
+                    .catch(function (error) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-lightning-charge-fill me-1"></i>Predecir ahora';
+                        errorText.innerText = "Error de conexión con el servidor.";
+                        errorContainer.classList.remove("d-none");
+                    });
+            });
+        }
     </script>
 </body>
 
